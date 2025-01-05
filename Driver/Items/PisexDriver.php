@@ -14,10 +14,17 @@ use Spiral\Database\Injection\Parameter;
 
 class PisexDriver implements DriverInterface
 {
+    private $sid;
+
+    public function __construct(array $config = [])
+    {
+        $this->sid = isset($config['sid']) ? $config['sid'] : 1;
+    }
+
     public function getCommsColumns(TableBuilder $tableBuilder)
     {
-        $tableBuilder->addColumn((new TableColumn('source', __('banscomms.table.type')))
-            ->setRender("{{ICON_TYPE}}", $this->typeFormatRender()));
+        $tableBuilder->addColumn((new TableColumn('punish_type', __('banscomms.table.type')))
+            ->setRender("{{PUNISH_TYPE}}", $this->typeFormatRender()));
 
         $tableBuilder->addColumn((new TableColumn('user_url'))->setVisible(false));
         $tableBuilder->addCombinedColumn('avatar', 'name', __('banscomms.table.loh'), 'user_url', true);
@@ -32,8 +39,6 @@ class PisexDriver implements DriverInterface
         $tableBuilder->addCombinedColumn('admin_avatar', 'admin_name', __('banscomms.table.admin'), 'admin_url', true);
 
         $tableBuilder->addColumns([
-            (new TableColumn('end', __('banscomms.table.end_date')))->setType('text')
-                ->setRender("{{ENDS}}", $this->dateFormatRender()),
             (new TableColumn('duration', ''))->setType('text')->setVisible(false),
             (new TableColumn('', __('banscomms.table.length')))
                 ->setSearchable(false)->setOrderable(false)
@@ -56,23 +61,21 @@ class PisexDriver implements DriverInterface
         $tableBuilder->addCombinedColumn('admin_avatar', 'admin_name', __('banscomms.table.admin'), 'admin_url', true);
 
         $tableBuilder->addColumns([
-            (new TableColumn('end', __('banscomms.table.end_date')))->setType('text')
-                ->setRender("{{ENDS}}", $this->dateFormatRender()),
             (new TableColumn('duration', ''))->setType('text')->setVisible(false),
             (new TableColumn('', __('banscomms.table.length')))
                 ->setSearchable(false)->setOrderable(false)
-                ->setRender('{{KEY}}', $this->timeFormatRenderBans()),
+                ->setRender('{{KEY}}', $this->timeFormatRender()),
         ]);
     }
 
-    private function dateFormatRender(): string
+    private function dateFormatRender() : string
     {
         return '
-            function(data, type) {
+            function(data, type, full) {
                 if (type === "display") {
                     let date = new Date(data * 1000);
-                    return ("0" + (date.getMonth() + 1)).slice(-2) + "-" +
-                           ("0" + date.getDate()).slice(-2) + "-" +
+                    return  ("0" + date.getDate()).slice(-2) + "." +
+                            ("0" + (date.getMonth() + 1)).slice(-2) + "." +
                            date.getFullYear() + " " +
                            ("0" + date.getHours()).slice(-2) + ":" +
                            ("0" + date.getMinutes()).slice(-2);
@@ -82,49 +85,38 @@ class PisexDriver implements DriverInterface
         ';
     }
 
-    private function typeFormatRender(): string
+    private function typeFormatRender() : string
     {
         return '
             function(data, type) {
                 if (type === "display") {
-                    return data == "mutes" ? `<i class="type-icon ph-bold ph-microphone-slash"></i>` : `<i class="type-icon ph-bold ph-chat-circle-dots"></i>`;
+                    switch(parseInt(data)) {
+                        case 1:
+                            return `<i class="type-icon ph-bold ph-microphone-slash"></i>`;
+                        case 2:
+                            return `<i class="type-icon ph-bold ph-chat-circle-dots"></i>`;
+                        default:
+                            return ``;
+                    }
                 }
                 return data;
             }
         ';
     }
 
-    private function timeFormatRender(): string
+    private function timeFormatRender() : string
     {
         return "
             function(data, type, full) {
-                let time = full[12];
-                let ends = full[11];
+                let created = full[4];
+                let expires = full[10];
 
-                if (time == '0') {
+                if (expires == 0) {
                     return '<div class=\"ban-chip bans-forever\">'+ t(\"banscomms.table.forever\") +'</div>';
-                } else if (Date.now() >= ends * 1000 && time != '0') {
-                    return '<div class=\"ban-chip bans-end\">' + secondsToReadable(time) + '</div>';
+                } else if (Date.now() / 1000 >= expires) {
+                    return '<div class=\"ban-chip bans-end\">' + secondsToReadable(expires) + '</div>';
                 } else {
-                    return '<div class=\"ban-chip\">' + secondsToReadable(time) + '</div>';
-                }
-            }
-        ";
-    }
-
-    private function timeFormatRenderBans(): string
-    {
-        return "
-            function(data, type, full) {
-                let time = full[11];
-                let ends = full[10];
-
-                if (time == '0') {
-                    return '<div class=\"ban-chip bans-forever\">'+ t(\"banscomms.table.forever\") +'</div>';
-                } else if (Date.now() >= ends * 1000 && time != '0') {
-                    return '<div class=\"ban-chip bans-end\">' + secondsToReadable(time) + '</div>';
-                } else {
-                    return '<div class=\"ban-chip\">' + secondsToReadable(time) + '</div>';
+                    return '<div class=\"ban-chip\">' + secondsToReadable(expires) + '</div>';
                 }
             }
         ";
@@ -140,20 +132,18 @@ class PisexDriver implements DriverInterface
         array $columns = [],
         array $search = [],
         array $order = []
-    ): array {
+    ) : array {
         $steam = $user->getSocialNetwork('Steam') ?? $user->getSocialNetwork('HttpsSteam');
 
         if (!$steam)
             return [];
 
         $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'bans')
-            ->where('bans.steamid', (int) $steam->value);
+            ->where('punishments.steamid', $steam->value);
 
-        // Применение пагинации
         $paginator = new \Spiral\Pagination\Paginator($perPage);
         $paginate = $paginator->withPage($page)->paginate($select);
 
-        // Получение данных
         $result = $select->fetchAll();
 
         $steamIds = $this->getSteamIds64($result);
@@ -161,7 +151,6 @@ class PisexDriver implements DriverInterface
 
         $result = $this->mapUsersDataToResult($result, $usersData);
 
-        // Формирование ответа
         return [
             'draw' => $draw,
             'recordsTotal' => $paginate->count(),
@@ -178,7 +167,7 @@ class PisexDriver implements DriverInterface
                     'admin_avatar',
                     'admin_name',
                     '',
-                    'end',
+                    'expires',
                     'duration',
                     ''
                 ],
@@ -197,37 +186,32 @@ class PisexDriver implements DriverInterface
         array $columns = [],
         array $search = [],
         array $order = []
-    ): array {
+    ) : array {
         $steam = $user->getSocialNetwork('Steam') ?? $user->getSocialNetwork('HttpsSteam');
 
         if (!$steam)
             return [];
 
-        list($selectMutes, $selectGags) = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'comms');
+        $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'comms')
+            ->where('punishments.steamid', $steam->value);
 
-        $selectMutes->where('mutes.steamid', (int) $steam->value);
-        $selectGags->where('gags.steamid', (int) $steam->value);
+        $paginator = new \Spiral\Pagination\Paginator($perPage);
+        $paginate = $paginator->withPage($page)->paginate($select);
 
-        // Fetch results separately for mutes and gags
-        $resultMutes = $selectMutes->fetchAll();
-        $resultGags = $selectGags->fetchAll();
+        $result = $select->fetchAll();
 
-        // Merge and slice the results according to pagination
-        $mergedResults = array_merge($resultMutes, $resultGags);
-        $paginatedResults = array_slice($mergedResults, ($page - 1) * $perPage, $perPage);
-
-        $steamIds = $this->getSteamIds64($paginatedResults);
+        $steamIds = $this->getSteamIds64($result);
         $usersData = steam()->getUsers($steamIds);
 
-        $paginatedResults = $this->mapUsersDataToResult($paginatedResults, $usersData);
+        $result = $this->mapUsersDataToResult($result, $usersData);
 
         return [
             'draw' => $draw,
-            'recordsTotal' => count($mergedResults),
-            'recordsFiltered' => count($mergedResults),
+            'recordsTotal' => $paginate->count(),
+            'recordsFiltered' => $paginate->count(),
             'data' => TablePreparation::normalize(
                 [
-                    'source',
+                    'punish_type',
                     'user_url',
                     'avatar',
                     'name',
@@ -238,11 +222,11 @@ class PisexDriver implements DriverInterface
                     'admin_avatar',
                     'admin_name',
                     '',
-                    'end',
+                    'expires',
                     'duration',
                     ''
                 ],
-                $paginatedResults
+                $result
             )
         ];
     }
@@ -256,29 +240,26 @@ class PisexDriver implements DriverInterface
         array $columns = [],
         array $search = [],
         array $order = []
-    ): array {
-        list($selectMutes, $selectGags) = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'comms');
+    ) : array {
+        $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'comms');
 
-        // Fetch results separately for mutes and gags
-        $resultMutes = $selectMutes->fetchAll();
-        $resultGags = $selectGags->fetchAll();
+        $paginator = new \Spiral\Pagination\Paginator($perPage);
+        $paginate = $paginator->withPage($page)->paginate($select);
 
-        // Merge and slice the results according to pagination
-        $mergedResults = array_merge($resultMutes, $resultGags);
-        $paginatedResults = array_slice($mergedResults, ($page - 1) * $perPage, $perPage);
+        $result = $select->fetchAll();
 
-        $steamIds = $this->getSteamIds64($paginatedResults);
+        $steamIds = $this->getSteamIds64($result);
         $usersData = steam()->getUsers($steamIds);
 
-        $paginatedResults = $this->mapUsersDataToResult($paginatedResults, $usersData);
+        $result = $this->mapUsersDataToResult($result, $usersData);
 
         return [
             'draw' => $draw,
-            'recordsTotal' => count($mergedResults),
-            'recordsFiltered' => count($mergedResults),
+            'recordsTotal' => $paginate->count(),
+            'recordsFiltered' => $paginate->count(),
             'data' => TablePreparation::normalize(
                 [
-                    'source',
+                    'punish_type',
                     'user_url',
                     'avatar',
                     'name',
@@ -289,11 +270,11 @@ class PisexDriver implements DriverInterface
                     'admin_avatar',
                     'admin_name',
                     '',
-                    'end',
+                    'expires',
                     'duration',
                     ''
                 ],
-                $paginatedResults
+                $result
             )
         ];
     }
@@ -307,8 +288,8 @@ class PisexDriver implements DriverInterface
         array $columns = [],
         array $search = [],
         array $order = []
-    ): array {
-        $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order);
+    ) : array {
+        $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'bans');
 
         $paginator = new \Spiral\Pagination\Paginator($perPage);
         $paginate = $paginator->withPage($page)->paginate($select);
@@ -336,7 +317,7 @@ class PisexDriver implements DriverInterface
                     'admin_avatar',
                     'admin_name',
                     '',
-                    'end',
+                    'expires',
                     'duration',
                     ''
                 ],
@@ -345,45 +326,40 @@ class PisexDriver implements DriverInterface
         ];
     }
 
-    private function prepareSelectQuery(Server $server, string $dbname, array $columns, array $search, array $order, string $table = 'bans')
+    private function prepareSelectQuery(Server $server, string $dbname, array $columns, array $search, array $order, string $type = 'bans')
     {
-        if ($table === 'comms') {
-            // Initialize an array to hold select queries
-            $selectQueries = [];
+        $punishTypes = ($type === 'comms') ? [1, 2] : [0];
 
-            foreach (['mutes', 'gags'] as $tableName) {
-                $select = $this->buildSelectQuery($dbname, $tableName, $columns, $search, $order);
-                array_push($selectQueries, $select);
-            }
-
-            return $selectQueries;
-        } else {
-            return $this->buildSelectQuery($dbname, "bans", $columns, $search, $order);
-        }
+        return $this->buildSelectQuery($dbname, $punishTypes, $columns, $search, $order);
     }
 
-    private function buildSelectQuery(string $dbname, string $tableName, array $columns, array $search, array $order)
+    private function buildSelectQuery(string $dbname, array $punishTypes, array $columns, array $search, array $order)
     {
-        $select = dbal()->database($dbname)->table($tableName)->select()->columns([
-            "$tableName.*",
-            new Fragment("'$tableName' as source")
-        ]);
+        $db = dbal()->database($dbname);
 
-        // Applying column-based search
-        foreach ($columns as $column) {
-            if ($column['searchable'] === 'true' && !empty($column['search']['value'])) {
-                $select->where($column['name'], 'like', '%' . $column['search']['value'] . '%');
-            }
+        $select = $db->select()->from('punishments')->columns([
+            'punishments.*',
+            'admins.name as admin_name',
+            'admins.steamid as admin_steamid'
+        ])->leftJoin('admins')->on('admins.id', '=', 'punishments.admin_id');
+
+        $select->where('punishments.punish_type', 'IN', new Parameter($punishTypes));
+
+        if ($this->sid != -1) {
+            $select->andWhere(function ($query) {
+                $query->where('punishments.server_id', $this->sid)
+                    ->orWhere('punishments.server_id', -1);
+            });
         }
 
         // Applying global search
         if (isset($search['value']) && !empty($search['value'])) {
-            $select->where(function ($select) use ($search, $tableName) {
-                $select->where("$tableName.name", 'like', '%' . $search['value'] . '%')
-                    ->orWhere("$tableName.steamid", 'like', '%' . $search['value'] . '%')
-                    ->orWhere("$tableName.admin_steamid", 'like', '%' . $search['value'] . '%')
-                    ->orWhere("$tableName.admin_name", 'like', '%' . $search['value'] . '%')
-                    ->orWhere("$tableName.reason", 'like', '%' . $search['value'] . '%');
+            $select->andWhere(function ($select) use ($search) {
+                $select->where('punishments.name', 'like', '%' . $search['value'] . '%')
+                    ->orWhere('punishments.steamid', 'like', '%' . $search['value'] . '%')
+                    ->orWhere('admins.steamid', 'like', '%' . $search['value'] . '%')
+                    ->orWhere('admins.name', 'like', '%' . $search['value'] . '%')
+                    ->orWhere('punishments.reason', 'like', '%' . $search['value'] . '%');
             });
         }
 
@@ -394,103 +370,101 @@ class PisexDriver implements DriverInterface
             $direction = strtolower($orderItem['dir']) === 'asc' ? 'ASC' : 'DESC';
 
             if ($columns[$columnIndex]['orderable'] === 'true') {
-                $select->orderBy("$tableName.$columnName", $direction);
+                $select->orderBy($columnName, $direction);
             }
         }
 
         return $select;
     }
 
-    public function getCounts(string $dbname, array &$excludeAdmins = [], bool $wasAll = false): array
+    public function getCounts(string $dbname, array &$excludeAdmins = [], bool $wasAll = false) : array
     {
         $db = dbal()->database($dbname);
 
-        $bansCount = $db->table('bans')->select();
-        $mutesCount = $db->table('mutes')->select();
-        $gagsCount = $db->table('gags')->select();
+        $bansCountQuery = $db->select()->from('punishments')
+            ->where('punish_type', 0);
 
-        if (!empty($excludeAdmins)) {
-            $bansCount->andWhere([
-                'admin_steamid' => [
-                    'NOT IN' => new Parameter($excludeAdmins)
-                ]
-            ]);
-            $mutesCount->andWhere([
-                'admin_steamid' => [
-                    'NOT IN' => new Parameter($excludeAdmins)
-                ]
-            ]);
-            $gagsCount->andWhere([
-                'admin_steamid' => [
-                    'NOT IN' => new Parameter($excludeAdmins)
-                ]
-            ]);
+        $commsCountQuery = $db->select()->from('punishments')
+            ->where('punish_type', 'IN', new Parameter([1]));
+
+        $gagsCountQuery = $db->select()->from('punishments')
+            ->where('punish_type', 'IN', new Parameter([2]));
+
+        if ($this->sid != -1) {
+            $bansCountQuery->andWhere(function ($query) {
+                $query->where('punishments.server_id', $this->sid)
+                    ->orWhere('punishments.server_id', -1);
+            });
+
+            $commsCountQuery->andWhere(function ($query) {
+                $query->where('punishments.server_id', $this->sid)
+                    ->orWhere('punishments.server_id', -1);
+            });
+
+            $gagsCountQuery->andWhere(function ($query) {
+                $query->where('punishments.server_id', $this->sid)
+                    ->orWhere('punishments.server_id', -1);
+            });
         }
 
-        try {
-            $uniqueAdmins = $db->table('admins')->select()->distinct()->columns('steamid');
+        $bansCount = $bansCountQuery->count();
+        $commsCount = $commsCountQuery->count();
+        $gagsCount = $gagsCountQuery->count();
 
-            $newAdmins = [];
-            foreach ($uniqueAdmins->fetchAll() as $admin) {
-                if (!in_array($admin['steamid'], $excludeAdmins)) {
-                    $excludeAdmins[] = $admin['steamid'];
-                    $newAdmins[] = $admin['steamid'];
-                }
+        $adminSteamidsQuery = $db->select('steamid')->from('admins')->distinct();
+
+        if ($this->sid != -1) {
+            $adminSteamidsQuery->innerJoin('admins_servers')->on('admins_servers.admin_id', '=', 'admins.id')
+                ->where('admins_servers.server_id', $this->sid);
+        }
+
+        $adminSteamids = $adminSteamidsQuery->fetchAll();
+
+        $newAdmins = [];
+        foreach ($adminSteamids as $admin) {
+            $adminSteamid = $admin['steamid'];
+            if (!in_array($adminSteamid, $excludeAdmins)) {
+                $excludeAdmins[] = $adminSteamid;
+                $newAdmins[] = $adminSteamid;
             }
-
-            return [
-                'bans' => $bansCount->count(),
-                'mutes' => $mutesCount->count(),
-                'gags' => $gagsCount->count(),
-                'admins' => sizeof($newAdmins)
-            ];
-        } catch (StatementException $e) {
-            logs()->error($e);
-
-            return [
-                'bans' => 0,
-                'mutes' => 0,
-                'gags' => 0,
-                'admins' => 0
-            ];
         }
+
+        return [
+            'bans' => $bansCount,
+            'mutes' => $commsCount,
+            'gags' => $gagsCount,
+            'admins' => count($newAdmins)
+        ];
     }
 
-    private function getSteamIds64(array $results): array
+    private function getSteamIds64(array $results) : array
     {
         $steamIds64 = [];
 
         foreach ($results as $result) {
-            try {
-                if (!isset($steamIds64[$result['steamid']])) {
-                    $steamId64 = steam()->steamid($result['steamid'])->ConvertToUInt64();
-                    $steamIds64[$result['steamid']] = $steamId64;
-                }
+            if (!empty($result['steamid']) && !isset($steamIds64[$result['steamid']])) {
+                $steamIds64[$result['steamid']] = $result['steamid'];
+            }
 
-                if (!isset($steamIds64[$result['admin_steamid']])) {
-                    $steamId64 = steam()->steamid($result['admin_steamid'])->ConvertToUInt64();
-                    $steamIds64[$result['admin_steamid']] = $steamId64;
-                }
-            } catch (\InvalidArgumentException $e) {
-                logs()->error($e);
-                unset($result);
+            if (!empty($result['admin_steamid']) && !isset($steamIds64[$result['admin_steamid']])) {
+                $steamIds64[$result['admin_steamid']] = $result['admin_steamid'];
             }
         }
 
         return $steamIds64;
     }
 
-    private function mapUsersDataToResult(array $results, array $usersData): array
+    private function mapUsersDataToResult(array $results, array $usersData) : array
     {
         $mappedResults = [];
 
         foreach ($results as $result) {
-            $steamId32 = $result['steamid'];
+            $steamId64 = $result['steamid'];
 
-            if (isset($usersData[$steamId32])) {
-                $user = $usersData[$steamId32];
-                $result['steamid'] = $usersData[$steamId32]->steamid;
+            if (isset($usersData[$steamId64])) {
+                $user = $usersData[$steamId64];
                 $result['avatar'] = $user->avatar;
+                $result['name'] = $user->personaname;
             } else {
                 $result['avatar'] = url('assets/img/no_avatar.webp')->get();
             }
@@ -499,18 +473,25 @@ class PisexDriver implements DriverInterface
                 "else-redirect" => "https://steamcommunity.com/profiles/" . $result['steamid']
             ])->get();
 
-            $adminSteam = $result['admin_steamid'];
+            if (!empty($result['admin_steamid'])) {
+                $adminSteamId64 = $result['admin_steamid'];
 
-            if (isset($usersData[$adminSteam])) {
-                $user = $usersData[$adminSteam];
-                $result['admin_steamid'] = $usersData[$adminSteam]->steamid;
-                $result['admin_avatar'] = $user->avatar;
+                if (isset($usersData[$adminSteamId64])) {
+                    $adminUser = $usersData[$adminSteamId64];
+                    $result['admin_avatar'] = $adminUser->avatar;
+                    $result['admin_name'] = $adminUser->personaname;
+                } else {
+                    $result['admin_avatar'] = url('assets/img/no_avatar.webp')->get();
+                    $result['admin_name'] = $result['admin_name'] ?? 'Console';
+                }
 
                 $result['admin_url'] = url('profile/search/' . $result['admin_steamid'])->addParams([
                     "else-redirect" => "https://steamcommunity.com/profiles/" . $result['admin_steamid']
                 ])->get();
             } else {
                 $result['admin_avatar'] = url('assets/img/no_avatar.webp')->get();
+                $result['admin_name'] = 'Console';
+                $result['admin_url'] = '';
             }
 
             $mappedResults[] = $result;
@@ -519,7 +500,7 @@ class PisexDriver implements DriverInterface
         return $mappedResults;
     }
 
-    public function getName(): string
+    public function getName() : string
     {
         return "PisexAdmin";
     }

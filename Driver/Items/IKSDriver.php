@@ -334,18 +334,22 @@ class IksDriver implements DriverInterface
     private function prepareSelectQuery(Server $server, string $dbname, array $columns, array $search, array $order, string $type = 'bans') : \Spiral\Database\Query\SelectQuery
     {
         $table = $type;
+
+        // Основной запрос
         $select = dbal()->database($dbname)->table($table)->select()->columns([
             "$table.*",
             'admins.name as admin_name',
             'admins.steam_id as admin_steam_id'
         ]);
 
+        // Фильтрация по колонкам
         foreach ($columns as $column) {
             if ($column['searchable'] == 'true' && $column['search']['value'] != '') {
                 $select->where($column['name'], 'like', "%" . $column['search']['value'] . "%");
             }
         }
 
+        // Глобальный поиск
         if (isset($search['value']) && !empty($search['value'])) {
             $select->where(function ($q) use ($search, $table) {
                 $q->where("$table.name", 'like', "%" . $search['value'] . "%")
@@ -356,6 +360,7 @@ class IksDriver implements DriverInterface
             });
         }
 
+        // Сортировка
         foreach ($order as $v) {
             $columnIndex = $v['column'];
             $columnName = $columns[$columnIndex]['name'];
@@ -366,19 +371,25 @@ class IksDriver implements DriverInterface
             }
         }
 
-        $select->innerJoin('admins as admins')->on(["$table.admin_id" => 'admins.id']);
+        // Подключаем таблицу admins через LEFT JOIN
+        $select->leftJoin('admins as admins')->on(["$table.admin_id" => 'admins.id']);
 
+        // Обработка связи с admin_to_server
         if ($this->sid) {
             $adminIdsSubquery = dbal()->database($dbname)
                 ->table('admin_to_server')
                 ->select('admin_id')
                 ->where('server_id', $this->sid);
 
-            $select->where(function($q) use ($table, $adminIdsSubquery) {
+            // Условие для admin_to_server с учётом CONSOLE
+            $select->where(function ($q) use ($table, $adminIdsSubquery) {
                 $q->where("$table.server_id", null)
                   ->orWhere("$table.server_id", $this->sid)
-                  ->andWhere('admins.id', 'IN', $adminIdsSubquery);
+                  ->orWhere('admins.steam_id', 'CONSOLE'); // Добавлено условие для CONSOLE
             });
+        } else {
+            // Если sid не указан, просто добавляем CONSOLE
+            $select->orWhere('admins.steam_id', 'CONSOLE');
         }
 
         return $select;

@@ -430,8 +430,8 @@ class FreshBansDriver implements DriverInterface
         $db = dbal()->database($dbname);
 
         $bansCount = $db->table('bans')->select();
-        $mutesCount = $db->table('mutes')->select()->where('type', 'MUTE');
-        $gagsCount = $db->table('mutes')->select()->where('type', 'GAG');
+        // $mutesCount = $db->table('mutes')->select()->where('type', 'MUTE');
+        // $gagsCount = $db->table('mutes')->select()->where('type', 'GAG');
 
         if (!empty($excludeAdmins)) {
             $bansCount->andWhere([
@@ -439,16 +439,16 @@ class FreshBansDriver implements DriverInterface
                     'NOT IN' => new Parameter($excludeAdmins)
                 ]
             ]);
-            $mutesCount->andWhere([
-                'admin_id' => [
-                    'NOT IN' => new Parameter($excludeAdmins)
-                ]
-            ]);
-            $gagsCount->andWhere([
-                'admin_id' => [
-                    'NOT IN' => new Parameter($excludeAdmins)
-                ]
-            ]);
+            // $mutesCount->andWhere([
+            //     'admin_id' => [
+            //         'NOT IN' => new Parameter($excludeAdmins)
+            //     ]
+            // ]);
+            // $gagsCount->andWhere([
+            //     'admin_id' => [
+            //         'NOT IN' => new Parameter($excludeAdmins)
+            //     ]
+            // ]);
         }
 
         try {
@@ -456,16 +456,16 @@ class FreshBansDriver implements DriverInterface
 
             $newAdmins = [];
             foreach ($uniqueAdmins->fetchAll() as $admin) {
-                if (!in_array($admin['player_id'], $excludeAdmins)) {
-                    $excludeAdmins[] = $admin['player_id'];
-                    $newAdmins[] = $admin['player_id'];
+                if (!in_array($admin['steamid'], $excludeAdmins)) {
+                    $excludeAdmins[] = $admin['steamid'];
+                    $newAdmins[] = $admin['steamid'];
                 }
             }
 
             return [
                 'bans' => $bansCount->count(),
-                'mutes' => $mutesCount->count(),
-                'gags' => $gagsCount->count(),
+                'mutes' => 0, //$mutesCount->count(),
+                'gags' => 0, //$gagsCount->count(),
                 'admins' => sizeof($newAdmins)
             ];
         } catch (StatementException $e) {

@@ -137,7 +137,7 @@ class FreshBansDriver implements DriverInterface
         return "
             function(data, type, full) {
                 let timeMinutes = parseInt(full[11]);
-                let ends = parseInt(full[10]) * 1000;
+                let ends = Date.parse(full[10]);
 
                 function minutesToReadable(minutes) {
                     let days = Math.floor(minutes / 1440);
@@ -176,11 +176,13 @@ class FreshBansDriver implements DriverInterface
     ): array {
         $steam = $user->getSocialNetwork('Steam') ?? $user->getSocialNetwork('HttpsSteam');
 
+        $steam = steam()->steamid($steam->value)->RenderSteam2();
+
         if (!$steam)
             return [];
 
         $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'bans')
-            ->where('bans.player_id', (int) $steam->value);
+            ->where('bans.player_id', 'like', '%' . substr($steam, 10) . '%');
 
         // Применение пагинации
         $paginator = new \Spiral\Pagination\Paginator($perPage);
@@ -220,6 +222,61 @@ class FreshBansDriver implements DriverInterface
         ];
     }
 
+    // public function getUserComms(
+    //     User $user,
+    //     Server $server,
+    //     string $dbname,
+    //     int $page,
+    //     int $perPage,
+    //     int $draw,
+    //     array $columns = [],
+    //     array $search = [],
+    //     array $order = []
+    // ): array {
+    //     $steam = $user->getSocialNetwork('Steam') ?? $user->getSocialNetwork('HttpsSteam');
+
+    //     if (!$steam)
+    //         return [];
+
+    //     $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'mutes');
+    //     $select->where('mutes.player_steamid', (int) $steam->value);
+
+    //     $paginator = new \Spiral\Pagination\Paginator($perPage);
+    //     $paginate = $paginator->withPage($page)->paginate($select);
+
+    //     $result = $select->fetchAll();
+
+    //     $steamIds = $this->getSteamIds64($result);
+    //     $usersData = steam()->getUsers($steamIds);
+
+    //     $result = $this->mapUsersDataToResult($result, $usersData);
+
+    //     return [
+    //         'draw' => $draw,
+    //         'recordsTotal' => $paginate->count(),
+    //         'recordsFiltered' => $paginate->count(),
+    //         'data' => TablePreparation::normalize(
+    //             [
+    //                 'type',
+    //                 'user_url',
+    //                 'avatar',
+    //                 'player_name',
+    //                 '',
+    //                 'ban_created',
+    //                 'reason',
+    //                 'admin_url',
+    //                 'admin_avatar',
+    //                 'admin_name',
+    //                 '',
+    //                 'ends',
+    //                 'ban_length',
+    //                 ''
+    //             ],
+    //             $result
+    //         )
+    //     ];
+    // }
+
     public function getUserComms(
         User $user,
         Server $server,
@@ -231,49 +288,61 @@ class FreshBansDriver implements DriverInterface
         array $search = [],
         array $order = []
     ): array {
-        $steam = $user->getSocialNetwork('Steam') ?? $user->getSocialNetwork('HttpsSteam');
-
-        if (!$steam)
-            return [];
-
-        $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'mutes');
-        $select->where('mutes.player_steamid', (int) $steam->value);
-
-        $paginator = new \Spiral\Pagination\Paginator($perPage);
-        $paginate = $paginator->withPage($page)->paginate($select);
-
-        $result = $select->fetchAll();
-
-        $steamIds = $this->getSteamIds64($result);
-        $usersData = steam()->getUsers($steamIds);
-
-        $result = $this->mapUsersDataToResult($result, $usersData);
-
         return [
             'draw' => $draw,
-            'recordsTotal' => $paginate->count(),
-            'recordsFiltered' => $paginate->count(),
-            'data' => TablePreparation::normalize(
-                [
-                    'type',
-                    'user_url',
-                    'avatar',
-                    'player_name',
-                    '',
-                    'ban_created',
-                    'reason',
-                    'admin_url',
-                    'admin_avatar',
-                    'admin_name',
-                    '',
-                    'ends',
-                    'ban_length',
-                    ''
-                ],
-                $result
-            )
+            'recordsTotal' => 0,
+            'recordsFiltered' => 0,
+            'data' => []
         ];
     }
+
+    // public function getComms(
+    //     Server $server,
+    //     string $dbname,
+    //     int $page,
+    //     int $perPage,
+    //     int $draw,
+    //     array $columns = [],
+    //     array $search = [],
+    //     array $order = []
+    // ): array {
+    //     $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'mutes');
+
+    //     $paginator = new \Spiral\Pagination\Paginator($perPage);
+    //     $paginate = $paginator->withPage($page)->paginate($select);
+
+    //     $result = $select->fetchAll();
+
+    //     $steamIds = $this->getSteamIds64($result);
+    //     $usersData = steam()->getUsers($steamIds);
+
+    //     $result = $this->mapUsersDataToResult($result, $usersData);
+
+    //     return [
+    //         'draw' => $draw,
+    //         'recordsTotal' => $paginate->count(),
+    //         'recordsFiltered' => $paginate->count(),
+    //         'data' => TablePreparation::normalize(
+    //             [
+    //                 'type',
+    //                 'user_url',
+    //                 'avatar',
+    //                 'player_name',
+    //                 '',
+    //                 'ban_created',
+    //                 'reason',
+    //                 'admin_url',
+    //                 'admin_avatar',
+    //                 'admin_name',
+    //                 '',
+    //                 'ends',
+    //                 'ban_length',
+    //                 ''
+    //             ],
+    //             $result
+    //         )
+    //     ];
+    // }
 
     public function getComms(
         Server $server,
@@ -285,41 +354,11 @@ class FreshBansDriver implements DriverInterface
         array $search = [],
         array $order = []
     ): array {
-        $select = $this->prepareSelectQuery($server, $dbname, $columns, $search, $order, 'mutes');
-
-        $paginator = new \Spiral\Pagination\Paginator($perPage);
-        $paginate = $paginator->withPage($page)->paginate($select);
-
-        $result = $select->fetchAll();
-
-        $steamIds = $this->getSteamIds64($result);
-        $usersData = steam()->getUsers($steamIds);
-
-        $result = $this->mapUsersDataToResult($result, $usersData);
-
         return [
             'draw' => $draw,
-            'recordsTotal' => $paginate->count(),
-            'recordsFiltered' => $paginate->count(),
-            'data' => TablePreparation::normalize(
-                [
-                    'type',
-                    'user_url',
-                    'avatar',
-                    'player_name',
-                    '',
-                    'ban_created',
-                    'reason',
-                    'admin_url',
-                    'admin_avatar',
-                    'admin_name',
-                    '',
-                    'ends',
-                    'ban_length',
-                    ''
-                ],
-                $result
-            )
+            'recordsTotal' => 0,
+            'recordsFiltered' => 0,
+            'data' => []
         ];
     }
 
